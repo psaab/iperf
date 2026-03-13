@@ -1192,6 +1192,7 @@ iperf_parse_arguments(struct iperf_test *test, int argc, char **argv)
         {"mptcp", no_argument, NULL, 'm'},
 #endif
         {"gsro", no_argument, NULL, OPT_GSRO},
+        {"inetd", no_argument, NULL, OPT_INETD},
         {"debug", optional_argument, NULL, 'd'},
         {"help", no_argument, NULL, 'h'},
         {NULL, 0, NULL, 0}
@@ -1805,6 +1806,12 @@ iperf_parse_arguments(struct iperf_test *test, int argc, char **argv)
 		test->settings->gso = 1;
 		test->settings->gro = 1;
                 break;
+	    case OPT_INETD:
+		test->inetd = 1;
+		test->one_off = 1;
+		iperf_set_test_role(test, 's');
+		server_flag = 1;
+		break;
 	    case 'h':
 		usage_long(stdout);
 		exit(0);
@@ -1826,6 +1833,10 @@ iperf_parse_arguments(struct iperf_test *test, int argc, char **argv)
     }
     if (test->role == 's' && gsro_flag) {
         i_errno = IECLIENTONLY;
+        return -1;
+    }
+    if (test->inetd && test->daemon) {
+        i_errno = IESERVCLIENT;
         return -1;
     }
 
@@ -3487,6 +3498,7 @@ iperf_defaults(struct iperf_test *testp)
     testp->settings->connect_timeout = -1;
     testp->settings->rcv_timeout.secs = DEFAULT_NO_MSG_RCVD_TIMEOUT / SEC_TO_mS;
     testp->settings->rcv_timeout.usecs = (DEFAULT_NO_MSG_RCVD_TIMEOUT % SEC_TO_mS) * mS_TO_US;
+    testp->inetd = 0;
     testp->zerocopy = 0;
     testp->settings->skip_rx_copy = 0;
     testp->settings->cntl_ka = 0;

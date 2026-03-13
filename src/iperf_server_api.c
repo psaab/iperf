@@ -112,20 +112,46 @@ iperf_server_worker_run(void *s) {
 int
 iperf_server_listen(struct iperf_test *test)
 {
+    if (test->inetd) {
+	test->listener = STDIN_FILENO;
+	/*
+	 * xinetd with wait=yes dup2's the listening socket to fd 0, 1, 2.
+	 * Redirect stdout and stderr to /dev/null so they don't hold
+	 * extra references to the listening socket and so writes don't
+	 * go to the socket.
+	 */
+	int devnull = open("/dev/null", O_RDWR);
+	if (devnull >= 0) {
+	    dup2(devnull, STDOUT_FILENO);
+	    dup2(devnull, STDERR_FILENO);
+	    if (devnull > STDERR_FILENO)
+		close(devnull);
+	}
+	/* Extract the port number from the inherited socket */
+	struct sockaddr_storage sa;
+	socklen_t sa_len = sizeof(sa);
+	if (getsockname(test->listener, (struct sockaddr *)&sa, &sa_len) == 0) {
+	    if (sa.ss_family == AF_INET)
+		test->server_port = ntohs(((struct sockaddr_in *)&sa)->sin_port);
+	    else if (sa.ss_family == AF_INET6)
+		test->server_port = ntohs(((struct sockaddr_in6 *)&sa)->sin6_port);
+	}
+    } else {
     retry:
-    if((test->listener = netannounce(test->settings->domain, Ptcp, test->bind_address, test->bind_dev, test->server_port)) < 0) {
-	if (errno == EAFNOSUPPORT && (test->settings->domain == AF_INET6 || test->settings->domain == AF_UNSPEC)) {
-	    /* If we get "Address family not supported by protocol", that
-	    ** probably means we were compiled with IPv6 but the running
-	    ** kernel does not actually do IPv6.  This is not too unusual,
-	    ** v6 support is and perhaps always will be spotty.
-	    */
-	    warning("this system does not seem to support IPv6 - trying IPv4");
-	    test->settings->domain = AF_INET;
-	    goto retry;
-	} else {
-	    i_errno = IELISTEN;
-	    return -1;
+	if((test->listener = netannounce(test->settings->domain, Ptcp, test->bind_address, test->bind_dev, test->server_port)) < 0) {
+	    if (errno == EAFNOSUPPORT && (test->settings->domain == AF_INET6 || test->settings->domain == AF_UNSPEC)) {
+		/* If we get "Address family not supported by protocol", that
+		** probably means we were compiled with IPv6 but the running
+		** kernel does not actually do IPv6.  This is not too unusual,
+		** v6 support is and perhaps always will be spotty.
+		*/
+		warning("this system does not seem to support IPv6 - trying IPv4");
+		test->settings->domain = AF_INET;
+		goto retry;
+	    } else {
+		i_errno = IELISTEN;
+		return -1;
+	    }
 	}
     }
 
@@ -903,7 +929,7 @@ iperf_run_server(struct iperf_test *test)
                         FD_CLR(test->prot_listener, &test->read_set);
                         close(test->prot_listener);
                         test->prot_listener = -1;
-                    } else {
+                    } else if (!test->inetd) {
                         if (test->no_delay || test->settings->mss || test->settings->socket_bufsize) {
                             FD_CLR(test->listener, &test->read_set);
                             close(test->listener);
@@ -918,6 +944,30 @@ iperf_run_server(struct iperf_test *test)
 			    if (test->listener > test->max_fd) test->max_fd = test->listener;
                         }
                     }
+
+                    if (test->inetd) {
+                        /*
+                         * Close the inherited listener and fork.  The
+                         * parent exits immediately so xinetd can resume
+                         * accepting new connections; the child continues
+                         * running the test.
+                         */
+                        if (test->listener >= 0) {
+                            FD_CLR(test->listener, &test->read_set);
+                            close(test->listener);
+                            test->listener = -1;
+                        }
+                        pid_t pid = fork();
+                        if (pid < 0) {
+                            cleanup_server(test);
+                            return -1;
+                        }
+                        if (pid > 0)
+                            _exit(0);
+                        /* Child: detach from xinetd's session */
+                        setsid();
+                    }
+
                     test->prot_listener = -1;
 
 		    /* Ensure that total requested data rate is not above limit */

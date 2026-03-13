@@ -193,6 +193,42 @@ iperf_tcp_listen(struct iperf_test *test)
      * It's not clear whether this is a requirement or a convenience.
      */
     if (test->no_delay || test->mptcp || test->settings->mss || test->settings->socket_bufsize) {
+	if (test->inetd) {
+	    /*
+	     * In inetd mode, we can't close and recreate the listener
+	     * since it was inherited from xinetd. Apply socket options
+	     * in-place on the existing socket.
+	     */
+#if defined(HAVE_IPPROTO_MPTCP)
+	    if (test->mptcp) {
+		warning("--mptcp requires socket creation with IPPROTO_MPTCP; cannot enable on inherited inetd socket");
+	    }
+#endif
+	    if (test->no_delay) {
+		opt = 1;
+		if (setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt)) < 0) {
+		    i_errno = IESETNODELAY;
+		    return -1;
+		}
+	    }
+	    // XXX: Setting MSS is very buggy!
+	    if ((opt = test->settings->mss)) {
+		if (setsockopt(s, IPPROTO_TCP, TCP_MAXSEG, &opt, sizeof(opt)) < 0) {
+		    i_errno = IESETMSS;
+		    return -1;
+		}
+	    }
+	    if ((opt = test->settings->socket_bufsize)) {
+		if (setsockopt(s, SOL_SOCKET, SO_RCVBUF, &opt, sizeof(opt)) < 0) {
+		    i_errno = IESETBUF;
+		    return -1;
+		}
+		if (setsockopt(s, SOL_SOCKET, SO_SNDBUF, &opt, sizeof(opt)) < 0) {
+		    i_errno = IESETBUF;
+		    return -1;
+		}
+	    }
+	} else {
 	struct addrinfo hints, *res;
 	char portstr[6];
 	int proto = 0;
@@ -331,6 +367,7 @@ iperf_tcp_listen(struct iperf_test *test)
         }
 
         test->listener = s;
+	} /* !inetd */
     }
 
     /* Read back and verify the sender socket buffer size */
