@@ -193,7 +193,7 @@ iperf_tcp_listen(struct iperf_test *test)
      * It's not clear whether this is a requirement or a convenience.
      */
     if (test->no_delay || test->mptcp || test->settings->mss || test->settings->socket_bufsize) {
-	if (test->inetd) {
+	if (test->inetd || test->systemd) {
 	    /*
 	     * In inetd mode, we can't close and recreate the listener
 	     * since it was inherited from xinetd. Apply socket options

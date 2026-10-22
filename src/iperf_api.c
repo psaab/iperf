@@ -1193,6 +1193,7 @@ iperf_parse_arguments(struct iperf_test *test, int argc, char **argv)
 #endif
         {"gsro", no_argument, NULL, OPT_GSRO},
         {"inetd", no_argument, NULL, OPT_INETD},
+        {"systemd", no_argument, NULL, OPT_SYSTEMD},
         {"debug", optional_argument, NULL, 'd'},
         {"help", no_argument, NULL, 'h'},
         {NULL, 0, NULL, 0}
@@ -1812,6 +1813,11 @@ iperf_parse_arguments(struct iperf_test *test, int argc, char **argv)
 		iperf_set_test_role(test, 's');
 		server_flag = 1;
 		break;
+	    case OPT_SYSTEMD:
+		test->systemd = 1;
+		iperf_set_test_role(test, 's');
+		server_flag = 1;
+		break;
 	    case 'h':
 		usage_long(stdout);
 		exit(0);
@@ -1836,6 +1842,10 @@ iperf_parse_arguments(struct iperf_test *test, int argc, char **argv)
         return -1;
     }
     if (test->inetd && test->daemon) {
+        i_errno = IESERVCLIENT;
+        return -1;
+    }
+    if ((test->systemd && test->daemon) || (test->systemd && test->inetd)) {
         i_errno = IESERVCLIENT;
         return -1;
     }
@@ -3499,6 +3509,8 @@ iperf_defaults(struct iperf_test *testp)
     testp->settings->rcv_timeout.secs = DEFAULT_NO_MSG_RCVD_TIMEOUT / SEC_TO_mS;
     testp->settings->rcv_timeout.usecs = (DEFAULT_NO_MSG_RCVD_TIMEOUT % SEC_TO_mS) * mS_TO_US;
     testp->inetd = 0;
+    testp->systemd = 0;
+    testp->systemd_child = 0;
     testp->zerocopy = 0;
     testp->settings->skip_rx_copy = 0;
     testp->settings->cntl_ka = 0;

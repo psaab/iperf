@@ -112,7 +112,31 @@ iperf_server_worker_run(void *s) {
 int
 iperf_server_listen(struct iperf_test *test)
 {
-    if (test->inetd) {
+    if (test->systemd) {
+	/* systemd Accept=no passes listening sockets from fd 3. */
+	char *fds = getenv("LISTEN_FDS");
+	char *pid = getenv("LISTEN_PID");
+	if (fds == NULL || pid == NULL || atoi(pid) != (int) getpid() || atoi(fds) < 1) {
+	    i_errno = IELISTEN;
+	    return -1;
+	}
+	signal(SIGCHLD, SIG_IGN); /* auto-reap forked test children */
+	test->listener = 3; /* SD_LISTEN_FDS_START */
+	int accepting = 0;
+	socklen_t accepting_len = sizeof(accepting);
+	if (getsockopt(test->listener, SOL_SOCKET, SO_ACCEPTCONN, &accepting, &accepting_len) < 0 || !accepting) {
+	    i_errno = IELISTEN;
+	    return -1;
+	}
+	struct sockaddr_storage sa;
+	socklen_t sa_len = sizeof(sa);
+	if (getsockname(test->listener, (struct sockaddr *)&sa, &sa_len) == 0) {
+	    if (sa.ss_family == AF_INET)
+		test->server_port = ntohs(((struct sockaddr_in *)&sa)->sin_port);
+	    else if (sa.ss_family == AF_INET6)
+		test->server_port = ntohs(((struct sockaddr_in6 *)&sa)->sin6_port);
+	}
+    } else if (test->inetd) {
 	test->listener = STDIN_FILENO;
 	/*
 	 * xinetd with wait=yes dup2's the listening socket to fd 0, 1, 2.
@@ -929,7 +953,7 @@ iperf_run_server(struct iperf_test *test)
                         FD_CLR(test->prot_listener, &test->read_set);
                         close(test->prot_listener);
                         test->prot_listener = -1;
-                    } else if (!test->inetd) {
+                    } else if (!test->inetd && !test->systemd) {
                         if (test->no_delay || test->settings->mss || test->settings->socket_bufsize) {
                             FD_CLR(test->listener, &test->read_set);
                             close(test->listener);
@@ -943,6 +967,36 @@ iperf_run_server(struct iperf_test *test)
                             FD_SET(test->listener, &test->read_set);
 			    if (test->listener > test->max_fd) test->max_fd = test->listener;
                         }
+                    }
+
+                    if (test->systemd) {
+                        /* Parent keeps fd 3 and accepts the next test;
+                         * child closes its listener copy and runs this one. */
+                        pid_t pid = fork();
+                        if (pid < 0) {
+                            cleanup_server(test);
+                            return -1;
+                        }
+                        if (pid > 0) {
+                            struct iperf_stream *sp;
+                            if (test->ctrl_sck > -1) {
+                                close(test->ctrl_sck);
+                                test->ctrl_sck = -1;
+                            }
+                            SLIST_FOREACH(sp, &test->streams, streams) {
+                                if (sp->socket > -1) {
+                                    close(sp->socket);
+                                    sp->socket = -1;
+                                }
+                            }
+                            return 2;
+                        }
+                        if (test->listener >= 0) {
+                            FD_CLR(test->listener, &test->read_set);
+                            close(test->listener);
+                            test->listener = -1;
+                        }
+                        test->systemd_child = 1;
                     }
 
                     if (test->inetd) {

@@ -354,6 +354,8 @@ struct iperf_test
     int       daemon;                           /* -D option */
     int       one_off;                          /* -1 option */
     int       inetd;                            /* --inetd option */
+    int       systemd;                          /* --systemd option */
+    int       systemd_child;                    /* forked test child (--systemd) */
     int       no_delay;                         /* -N option */
     int       reverse;                          /* -R option */
     int       bidirectional;                    /* --bidirectional */

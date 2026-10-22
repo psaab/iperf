@@ -170,6 +170,11 @@ run(struct iperf_test *test)
 		int rc;
 		rc = iperf_run_server(test);
                 test->server_last_run_rc = rc;
+		if (test->systemd_child) {
+		    /* Forked --systemd test child: one test, then exit. */
+		    iflush(test);
+		    exit(0);
+		}
 		if (rc < 0) {
 		    iperf_err(test, "error - %s", iperf_strerror(i_errno));
                     if (test->json_output) {

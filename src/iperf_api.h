@@ -108,6 +108,7 @@ typedef atomic_uint_fast64_t atomic_iperf_size_t;
 #define OPT_SERVER_MAX_DURATION 34
 #define OPT_GSRO 35
 #define OPT_INETD 36
+#define OPT_SYSTEMD 37
 
 /* states */
 #define TEST_START 1
