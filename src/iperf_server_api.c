@@ -580,11 +580,17 @@ cleanup_server(struct iperf_test *test)
         test->ctrl_sck = -1;
     }
     if (test->listener > -1) {
-	close(test->listener);
+	/* In --systemd mode fd 3 is shared with systemd for the process
+	 * lifetime; closing it here (e.g. after an aborted client) would
+	 * make the next listen fail with EBADF. Child copies are closed
+	 * at exit. */
+	if (!(test->systemd && test->listener == 3))
+	    close(test->listener);
         test->listener = -1;
     }
     if (test->prot_listener > -1) {     // May remain open if create socket failed
-	close(test->prot_listener);
+	if (!(test->systemd && test->prot_listener == 3))
+	    close(test->prot_listener);
         test->prot_listener = -1;
     }
 
